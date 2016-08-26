@@ -84,28 +84,43 @@ func TestDriverPanic(t *testing.T) {
 		f()
 	}
 
-	expectPanic("Exec Exec", func() { db.Exec("PANIC|Exec|WIPE") })
+	// db.Exec - panics in driver.Stmt
+	expectPanic("Exec fakeStmt.Exec", func() { db.Exec("PANIC|fakeStmt.Exec|WIPE") })
 	exec(t, db, "WIPE") // check not deadlocked
-	expectPanic("Exec NumInput", func() { db.Exec("PANIC|NumInput|WIPE") })
+	expectPanic("Exec fakeStmt.NumInput", func() { db.Exec("PANIC|fakeStmt.NumInput|WIPE") })
 	exec(t, db, "WIPE") // check not deadlocked
-	expectPanic("Exec Close", func() { db.Exec("PANIC|Close|WIPE") })
-	exec(t, db, "WIPE")             // check not deadlocked
-	exec(t, db, "PANIC|Query|WIPE") // should run successfully: Exec does not call Query
-	exec(t, db, "WIPE")             // check not deadlocked
+	expectPanic("Exec fakeStmt.Close", func() { db.Exec("PANIC|fakeStmt.Close|WIPE") })
+	exec(t, db, "WIPE")                      // check not deadlocked
+	exec(t, db, "PANIC|fakeStmt.Query|WIPE") // should run successfully: Exec does not call Query
+	exec(t, db, "WIPE")                      // check not deadlocked
+
+	// db.Exec - panics in driver.Conn
+	expectPanic("Exec fakeConn.Exec", func() { db.Exec("PANIC|fakeConn.Exec|WIPE") })
+	exec(t, db, "WIPE") // check not deadlocked
+	expectPanic("Exec fakeConn.Prepare", func() { db.Exec("PANIC|fakeConn.Prepare|WIPE") })
+	exec(t, db, "WIPE")                      // check not deadlocked
+	exec(t, db, "PANIC|fakeConn.Query|WIPE") // should run successfully: Exec does not call Query
+	exec(t, db, "WIPE")                      // check not deadlocked
 
 	exec(t, db, "CREATE|people|name=string,age=int32,photo=blob,dead=bool,bdate=datetime")
 
-	expectPanic("Query Query", func() { db.Query("PANIC|Query|SELECT|people|age,name|") })
-	expectPanic("Query NumInput", func() { db.Query("PANIC|NumInput|SELECT|people|age,name|") })
-	expectPanic("Query Close", func() {
-		rows, err := db.Query("PANIC|Close|SELECT|people|age,name|")
+	// db.Query - panics in driver.Stmt
+	expectPanic("Query fakeStmt.Query", func() { db.Query("PANIC|fakeStmt.Query|SELECT|people|age,name|") })
+	expectPanic("Query fakeStmt.NumInput", func() { db.Query("PANIC|fakeStmt.NumInput|SELECT|people|age,name|") })
+	expectPanic("Query fakeStmt.Close", func() {
+		rows, err := db.Query("PANIC|fakeStmt.Close|SELECT|people|age,name|")
 		if err != nil {
 			t.Fatal(err)
 		}
 		rows.Close()
 	})
-	db.Query("PANIC|Exec|SELECT|people|age,name|") // should run successfully: Query does not call Exec
-	exec(t, db, "WIPE")                            // check not deadlocked
+	expectPanic("Query fakeConn.Query", func() { db.Query("PANIC|fakeConn.Query|SELECT|people|age,name|") })
+	exec(t, db, "WIPE") // check not deadlocked
+	expectPanic("Query fakeConn.Prepare", func() { db.Exec("PANIC|fakeConn.Prepare|WIPE") })
+	exec(t, db, "WIPE") // check not deadlocked
+
+	db.Query("PANIC|fakeStmt.Exec|SELECT|people|age,name|") // should run successfully: Query does not call Exec
+	exec(t, db, "WIPE")                                     // check not deadlocked
 }
 
 func exec(t testing.TB, db *DB, query string, args ...interface{}) {

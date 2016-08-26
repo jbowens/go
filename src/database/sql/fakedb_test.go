@@ -33,8 +33,8 @@ var _ = log.Printf
 //   INSERT|<tablename>|col=val,col2=val2,col3=?
 //   SELECT|<tablename>|projectcol1,projectcol2|filtercol=?,filtercol2=?
 //
-// Any of these can be preceded by PANIC|<method>|, to cause the
-// named method on fakeStmt to panic.
+// Any of these can be preceded by PANIC|<type>.<method>| to cause
+// the named method on fakeStmt or fakeConn to panic.
 //
 // When opening a fakeDriver's database, it starts empty with no
 // tables. All tables and data are stored in memory only.
@@ -347,6 +347,9 @@ func checkSubsetTypes(args []driver.Value) error {
 }
 
 func (c *fakeConn) Exec(query string, args []driver.Value) (driver.Result, error) {
+	if strings.HasPrefix(query, "PANIC|fakeConn.Exec") {
+		panic("fakeConn.Exec")
+	}
 	// This is an optional interface, but it's implemented here
 	// just to check that all the args are of the proper types.
 	// ErrSkip is returned so the caller acts as if we didn't
@@ -359,6 +362,9 @@ func (c *fakeConn) Exec(query string, args []driver.Value) (driver.Result, error
 }
 
 func (c *fakeConn) Query(query string, args []driver.Value) (driver.Rows, error) {
+	if strings.HasPrefix(query, "PANIC|fakeConn.Query") {
+		panic("fakeConn.Query")
+	}
 	// This is an optional interface, but it's implemented here
 	// just to check that all the args are of the proper types.
 	// ErrSkip is returned so the caller acts as if we didn't
@@ -483,6 +489,9 @@ func (c *fakeConn) prepareInsert(stmt *fakeStmt, parts []string) (driver.Stmt, e
 var hookPrepareBadConn func() bool
 
 func (c *fakeConn) Prepare(query string) (driver.Stmt, error) {
+	if strings.HasPrefix(query, "PANIC|fakeConn.Prepare") {
+		panic("fakeConn.Prepare")
+	}
 	c.numPrepare++
 	if c.db == nil {
 		panic("nil c.db; conn = " + fmt.Sprintf("%#v", c))
@@ -527,7 +536,7 @@ func (c *fakeConn) Prepare(query string) (driver.Stmt, error) {
 }
 
 func (s *fakeStmt) ColumnConverter(idx int) driver.ValueConverter {
-	if s.panic == "ColumnConverter" {
+	if s.panic == "fakeStmt.ColumnConverter" {
 		panic(s.panic)
 	}
 	if len(s.placeholderConverter) == 0 {
@@ -537,7 +546,7 @@ func (s *fakeStmt) ColumnConverter(idx int) driver.ValueConverter {
 }
 
 func (s *fakeStmt) Close() error {
-	if s.panic == "Close" {
+	if s.panic == "fakeStmt.Close" {
 		panic(s.panic)
 	}
 	if s.c == nil {
@@ -559,7 +568,7 @@ var errClosed = errors.New("fakedb: statement has been closed")
 var hookExecBadConn func() bool
 
 func (s *fakeStmt) Exec(args []driver.Value) (driver.Result, error) {
-	if s.panic == "Exec" {
+	if s.panic == "fakeStmt.Exec" {
 		panic(s.panic)
 	}
 	if s.closed {
@@ -646,7 +655,7 @@ func (s *fakeStmt) execInsert(args []driver.Value, doInsert bool) (driver.Result
 var hookQueryBadConn func() bool
 
 func (s *fakeStmt) Query(args []driver.Value) (driver.Rows, error) {
-	if s.panic == "Query" {
+	if s.panic == "fakeStmt.Query" {
 		panic(s.panic)
 	}
 	if s.closed {
@@ -731,7 +740,7 @@ rows:
 }
 
 func (s *fakeStmt) NumInput() int {
-	if s.panic == "NumInput" {
+	if s.panic == "fakeStmt.NumInput" {
 		panic(s.panic)
 	}
 	return s.placeholders

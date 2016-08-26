@@ -297,7 +297,9 @@ func (dc *driverConn) expired(timeout time.Duration) bool {
 	return dc.createdAt.Add(timeout).Before(nowFunc())
 }
 
-func (dc *driverConn) prepareLocked(query string) (driver.Stmt, error) {
+func (dc *driverConn) prepare(query string) (driver.Stmt, error) {
+	dc.Lock()
+	defer dc.Unlock()
 	si, err := dc.ci.Prepare(query)
 	if err == nil {
 		// Track each driverConn's open statements, so we can close them
@@ -983,9 +985,7 @@ func (db *DB) prepare(query string, strategy connReuseStrategy) (*Stmt, error) {
 	if err != nil {
 		return nil, err
 	}
-	dc.Lock()
-	si, err := dc.prepareLocked(query)
-	dc.Unlock()
+	si, err := dc.prepare(query)
 	if err != nil {
 		db.putConn(dc, err)
 		return nil, err
@@ -1018,6 +1018,32 @@ func (db *DB) Exec(query string, args ...interface{}) (Result, error) {
 	return res, err
 }
 
+func driverExec(dc *driverConn, query string, args []interface{}) (res Result, err error) {
+	execer, ok := dc.ci.(driver.Execer)
+	if !ok {
+		return res, driver.ErrSkip
+	}
+
+	dargs, err := driverArgs(nil, args)
+	if err != nil {
+		return nil, err
+	}
+
+	dc.Lock()
+	defer dc.Unlock()
+	resi, err := execer.Exec(query, dargs)
+	if err != nil {
+		return res, err
+	}
+	return driverResult{dc, resi}, nil
+}
+
+func driverPrepare(dc *driverConn, query string) (si driver.Stmt, err error) {
+	dc.Lock()
+	defer dc.Unlock()
+	return dc.ci.Prepare(query)
+}
+
 func (db *DB) exec(query string, args []interface{}, strategy connReuseStrategy) (res Result, err error) {
 	dc, err := db.conn(strategy)
 	if err != nil {
@@ -1027,25 +1053,12 @@ func (db *DB) exec(query string, args []interface{}, strategy connReuseStrategy)
 		db.putConn(dc, err)
 	}()
 
-	if execer, ok := dc.ci.(driver.Execer); ok {
-		dargs, err := driverArgs(nil, args)
-		if err != nil {
-			return nil, err
-		}
-		dc.Lock()
-		resi, err := execer.Exec(query, dargs)
-		dc.Unlock()
-		if err != driver.ErrSkip {
-			if err != nil {
-				return nil, err
-			}
-			return driverResult{dc, resi}, nil
-		}
+	res, err = driverExec(dc, query, args)
+	if err != driver.ErrSkip {
+		return res, err
 	}
 
-	dc.Lock()
-	si, err := dc.ci.Prepare(query)
-	dc.Unlock()
+	si, err := driverPrepare(dc, query)
 	if err != nil {
 		return nil, err
 	}
@@ -1107,9 +1120,7 @@ func (db *DB) queryConn(dc *driverConn, releaseConn func(error), query string, a
 		}
 	}
 
-	dc.Lock()
-	si, err := dc.ci.Prepare(query)
-	dc.Unlock()
+	si, err := driverPrepare(dc, query)
 	if err != nil {
 		releaseConn(err)
 		return nil, err
@@ -1299,9 +1310,7 @@ func (tx *Tx) Prepare(query string) (*Stmt, error) {
 		return nil, err
 	}
 
-	dc.Lock()
-	si, err := dc.ci.Prepare(query)
-	dc.Unlock()
+	si, err := driverPrepare(dc, query)
 	if err != nil {
 		return nil, err
 	}
@@ -1346,9 +1355,7 @@ func (tx *Tx) Stmt(stmt *Stmt) *Stmt {
 	if err != nil {
 		return &Stmt{stickyErr: err}
 	}
-	dc.Lock()
-	si, err := dc.ci.Prepare(stmt.query)
-	dc.Unlock()
+	si, err := driverPrepare(dc, stmt.query)
 	txs := &Stmt{
 		db: tx.db,
 		tx: tx,
@@ -1373,25 +1380,12 @@ func (tx *Tx) Exec(query string, args ...interface{}) (Result, error) {
 		return nil, err
 	}
 
-	if execer, ok := dc.ci.(driver.Execer); ok {
-		dargs, err := driverArgs(nil, args)
-		if err != nil {
-			return nil, err
-		}
-		dc.Lock()
-		resi, err := execer.Exec(query, dargs)
-		dc.Unlock()
-		if err == nil {
-			return driverResult{dc, resi}, nil
-		}
-		if err != driver.ErrSkip {
-			return nil, err
-		}
+	res, err := driverExec(dc, query, args)
+	if err != driver.ErrSkip {
+		return res, err
 	}
 
-	dc.Lock()
-	si, err := dc.ci.Prepare(query)
-	dc.Unlock()
+	si, err := driverPrepare(dc, query)
 	if err != nil {
 		return nil, err
 	}
@@ -1578,9 +1572,7 @@ func (s *Stmt) connStmt() (ci *driverConn, releaseConn func(error), si driver.St
 	s.mu.Unlock()
 
 	// No luck; we need to prepare the statement on this connection
-	dc.Lock()
-	si, err = dc.prepareLocked(s.query)
-	dc.Unlock()
+	si, err = dc.prepare(s.query)
 	if err != nil {
 		s.db.putConn(dc, err)
 		return nil, nil, nil, err
